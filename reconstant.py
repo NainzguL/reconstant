@@ -22,13 +22,13 @@ class Operation:
         self.operands = operands
         self.operationType = operationType
 
-    def output(self, prefix, symbol, suffix):
+    def output(self, prefix, symbol, suffix, stringDelimiter='"'):
         output = prefix
         separator = ''
         for operand in self.operands:
             if Constant.INDEX_VALUE in operand:
                 if self.operationType == Constant.INDEX_OPERATION_CONCAT:
-                    output = output + separator + f'"{operand[Constant.INDEX_VALUE]}"'
+                    output = output + separator + f'{stringDelimiter}{operand[Constant.INDEX_VALUE]}{stringDelimiter}'
                 else:
                     output = output + separator + f"{operand[Constant.INDEX_VALUE]}"
             elif Constant.INDEX_REFERENCE in operand:
@@ -96,11 +96,12 @@ class Outputer:
         self._output = open(self.path, "w+")
         self._comment_mark = '//'
         self._comment_indentation = 0
-        self._concat_marks = ['', '+', '']
-        self._addition_marks = ['', '+', '']
-        self._substraction_marks = ['', '-', '']
-        self._multiplier_marks = ['', '*', '']
-        self._divider_marks = ['', '/', '']
+        self._string_delimiter = '"'
+        self._concat_marks = ['', ' + ', '']
+        self._addition_marks = ['', ' + ', '']
+        self._substraction_marks = ['', ' - ', '']
+        self._multiplier_marks = ['', ' * ', '']
+        self._divider_marks = ['', ' / ', '']
 
     def __del__(self):
         self._output.close()
@@ -118,7 +119,7 @@ class Outputer:
             if constant.constantType == int:
                 value = constant.value
             elif constant.constantType == str:
-                value = f'"{constant.value}"'
+                value = f'{self._string_delimiter}{constant.value}{self._string_delimiter}'
             else:
                 raise Exception("Internal error - illegal constant type. %s", constant.constantType)
             self._output.write(f"{prefix}{constant.name}{assignment}{value}{suffix}\n")
@@ -126,7 +127,7 @@ class Outputer:
             constantOutput = ''
             match constant.operation.operationType:
                 case Constant.INDEX_OPERATION_CONCAT:
-                    constantOutput = constant.operation.output(*self._concat_marks)
+                    constantOutput = constant.operation.output(*self._concat_marks, self._string_delimiter)
                 case Constant.INDEX_OPERATION_SUM:
                     constantOutput = constant.operation.output(*self._addition_marks)
                 case Constant.INDEX_OPERATION_SUB:
@@ -155,6 +156,7 @@ class PythonOutputer (Outputer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._comment_mark = '#'
+        self._string_delimiter = "'"
 
     def output_header(self):
         super().output_header()
@@ -171,6 +173,7 @@ class JavascriptOutputer (Outputer):
     def output_enum(self, enum: Enum):
         self._output.write(f"export const {enum.name} = {{\n")
         super().output_enum(enum, prefix=f"\t", assignment=":", suffix=",")
+        self._string_delimiter = "'"
         self._output.write(f"}}\n")
 
     def output_constant(self, constant: Constant):
@@ -183,6 +186,7 @@ class PhpOutputer (Outputer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._concat_marks = ['', '.', '']
+        self._string_delimiter = "'"
         self._namespaceDefinition = args[0]['namespace']
 
     def output_header(self):
