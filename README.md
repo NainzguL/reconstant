@@ -291,9 +291,9 @@ Define('NUMBER_DIV', NUMBER_BASE/5);
 
 // enums
 enum SomeEnum {
-	A;
-	B;
-	C;
+	case A;
+	case B;
+	case C;
 }
 enum OtherEnum {
 	FOO;

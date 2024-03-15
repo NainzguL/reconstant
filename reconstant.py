@@ -196,8 +196,8 @@ class PhpOutputer (Outputer):
             self._output.write(f'namespace {self._namespaceDefinition};\n')
 
     def output_enum(self, enum: Enum):
-        separator = ';\n\t'
-        self._output.write(f"enum {enum.name} {{\n\t{separator.join([val for val in enum.values])};\n}}\n")
+        separator = ';\n\tcase '
+        self._output.write(f"enum {enum.name} {{\n\tcase {separator.join([val for val in enum.values])};\n}}\n")
 
     def output_constant(self, constant: Constant):
         return super().output_constant(constant, prefix="Define('", assignment="', ", suffix=");")
