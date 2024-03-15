@@ -296,7 +296,7 @@ enum SomeEnum {
 	case C;
 }
 enum OtherEnum {
-	FOO;
-	BAR;
+	case FOO;
+	case BAR;
 }
 ```
