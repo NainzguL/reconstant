@@ -14,13 +14,68 @@ class Enum:
         self.values = values
 
 
-class Constant:
-    name: str
-    value: Union[int, str]
+class Operation:
+    operationType: str
+    operands: List
 
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
+    def __init__(self, operands, operationType):
+        self.operands = operands
+        self.operationType = operationType
+
+    def output(self, prefix, symbol, suffix, stringDelimiter='"'):
+        output = prefix
+        separator = ''
+        for operand in self.operands:
+            if Constant.INDEX_VALUE in operand:
+                if self.operationType == Constant.INDEX_OPERATION_CONCAT:
+                    output = output + separator + f'{stringDelimiter}{operand[Constant.INDEX_VALUE]}{stringDelimiter}'
+                else:
+                    output = output + separator + f"{operand[Constant.INDEX_VALUE]}"
+            elif Constant.INDEX_REFERENCE in operand:
+                output = output + separator + operand[Constant.INDEX_REFERENCE]
+            separator = symbol
+        output = output + suffix
+
+        return output
+
+
+class Constant:
+    # Indexes
+    INDEX_VALUE = 'value'
+    INDEX_REFERENCE = 'ref'
+    INDEX_OPERATION_CONCAT = 'concat'
+    INDEX_OPERATION_SUM = 'sum'
+    INDEX_OPERATION_SUB = 'sub'
+    INDEX_OPERATION_MUL = 'mul'
+    INDEX_OPERATION_DIV = 'div'
+
+    name: str
+    value: str
+    constantType: type
+    operation: Operation
+
+    def __init__(self, constantDefinition):
+        self.name = constantDefinition['name']
+        self.value = None
+        self.operation = None
+        if Constant.INDEX_VALUE in constantDefinition:
+            self.value = constantDefinition[Constant.INDEX_VALUE]
+            self.constantType = type(self.value)
+        else:
+            if Constant.INDEX_OPERATION_CONCAT in constantDefinition:
+                self.operation = Operation(constantDefinition[Constant.INDEX_OPERATION_CONCAT], Constant.INDEX_OPERATION_CONCAT)
+            elif Constant.INDEX_OPERATION_SUM in constantDefinition:
+                self.operation = Operation(constantDefinition[Constant.INDEX_OPERATION_SUM], Constant.INDEX_OPERATION_SUM)
+            elif Constant.INDEX_OPERATION_SUB in constantDefinition:
+                self.operation = Operation(constantDefinition[Constant.INDEX_OPERATION_SUB], Constant.INDEX_OPERATION_SUB)
+            elif Constant.INDEX_OPERATION_MUL in constantDefinition:
+                self.operation = Operation(constantDefinition[Constant.INDEX_OPERATION_MUL], Constant.INDEX_OPERATION_MUL)
+            elif Constant.INDEX_OPERATION_DIV in constantDefinition:
+                self.operation = Operation(constantDefinition[Constant.INDEX_OPERATION_DIV], Constant.INDEX_OPERATION_DIV)
+
+            for operand in self.operation.operands:
+                if Constant.INDEX_VALUE in operand:
+                    self.constantType = type(operand[Constant.INDEX_VALUE])
 
 
 class Outputer:
@@ -28,12 +83,25 @@ class Outputer:
     _output: TextIO
     _comment_mark: str
     _comment_indentation: int  # doesn't apply to the comment in output_header()
+    _concat_marks: List[str]
+    _addition_marks: List[str]
+    _substraction_marks: List[str]
+    _multiplier_marks: List[str]
+    _divider_marks: List[str]
+    _hasEnums: bool = False
+    _hasConstants: bool = False
 
-    def __init__(self, *args, comment_mark="//", comment_indentation=0, **kwargs):
+    def __init__(self, *args, **kwargs):
         self.path = args[0]['path']
-        self._output = open(self.path, "w")
-        self._comment_mark = comment_mark
-        self._comment_indentation = comment_indentation
+        self._output = open(self.path, "w+")
+        self._comment_mark = '//'
+        self._comment_indentation = 0
+        self._string_delimiter = '"'
+        self._concat_marks = ['', ' + ', '']
+        self._addition_marks = ['', ' + ', '']
+        self._substraction_marks = ['', ' - ', '']
+        self._multiplier_marks = ['', ' * ', '']
+        self._divider_marks = ['', ' / ', '']
 
     def __del__(self):
         self._output.close()
@@ -46,14 +114,30 @@ class Outputer:
         indent = '\t' * self._comment_indentation
         self._output.write(f"\n{indent}{self._comment_mark} {comment}\n")
 
-    def output_constant(self, constant: Constant, prefix="", assignment="=", suffix=""):
-        if type(constant.value) == int:
-            value = constant.value
-        elif type(constant.value) == str:
-            value = f'"{constant.value}"'
-        else:
-            raise Exception("Internal error - illegal constant type. %s", type(constant.value))
-        self._output.write(f"{prefix}{constant.name} {assignment} {value}{suffix}\n")
+    def output_constant(self, constant: Constant, prefix="", assignment=" = ", suffix=""):
+        if constant.value is not None:
+            if constant.constantType == int:
+                value = constant.value
+            elif constant.constantType == str:
+                value = f'{self._string_delimiter}{constant.value}{self._string_delimiter}'
+            else:
+                raise Exception("Internal error - illegal constant type. %s", constant.constantType)
+            self._output.write(f"{prefix}{constant.name}{assignment}{value}{suffix}\n")
+        elif constant.operation is not None:
+            constantOutput = ''
+            match constant.operation.operationType:
+                case Constant.INDEX_OPERATION_CONCAT:
+                    constantOutput = constant.operation.output(*self._concat_marks, self._string_delimiter)
+                case Constant.INDEX_OPERATION_SUM:
+                    constantOutput = constant.operation.output(*self._addition_marks)
+                case Constant.INDEX_OPERATION_SUB:
+                    constantOutput = constant.operation.output(*self._substraction_marks)
+                case Constant.INDEX_OPERATION_MUL:
+                    constantOutput = constant.operation.output(*self._multiplier_marks)
+                case Constant.INDEX_OPERATION_DIV:
+                    constantOutput = constant.operation.output(*self._divider_marks)
+
+            self._output.write(f"{prefix}{constant.name}{assignment}{constantOutput}{suffix}\n")
 
     def output_header(self):
         self._output.write(f"{self._comment_mark} autogenerated by reconstant - do not edit!\n")
@@ -61,14 +145,23 @@ class Outputer:
     def output_footer(self):
         pass
 
+    def setHasEnum(self, hasEnum: bool):
+        self._hasEnums = hasEnum
+
+    def setHasConstants(self, hasConstants: bool):
+        self._hasConstants = hasConstants
+
 
 class PythonOutputer (Outputer):
     def __init__(self, *args, **kwargs):
-        super().__init__(comment_mark="#", *args, **kwargs)
+        super().__init__(*args, **kwargs)
+        self._comment_mark = '#'
+        self._string_delimiter = "'"
 
     def output_header(self):
         super().output_header()
-        self._output.write("from enum import Enum\n")
+        if self._hasEnums:
+            self._output.write("from enum import Enum\n")
 
     def output_enum(self, enum: Enum):
         self._output.write(f"class {enum.name}(Enum):\n")
@@ -80,6 +173,7 @@ class JavascriptOutputer (Outputer):
     def output_enum(self, enum: Enum):
         self._output.write(f"export const {enum.name} = {{\n")
         super().output_enum(enum, prefix=f"\t", assignment=":", suffix=",")
+        self._string_delimiter = "'"
         self._output.write(f"}}\n")
 
     def output_constant(self, constant: Constant):
@@ -87,24 +181,41 @@ class JavascriptOutputer (Outputer):
 
 
 class PhpOutputer (Outputer):
+    _namespaceDefinition: str
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._concat_marks = ['', '.', '']
+        self._string_delimiter = "'"
+        self._namespaceDefinition = args[0]['namespace']
+
     def output_header(self):
         self._output.write("<?php\n")
         super().output_header()
+        if self._namespaceDefinition:
+            self._output.write(f'namespace {self._namespaceDefinition};\n')
 
     def output_enum(self, enum: Enum):
-        separator = ';\n\t'
-        self._output.write(f"Enum {enum.name} {{\n\t{separator.join([val for val in enum.values])};\n}}\n")
+        separator = ';\n\tcase '
+        self._output.write(f"enum {enum.name} {{\n\tcase {separator.join([val for val in enum.values])};\n}}\n")
 
     def output_constant(self, constant: Constant):
-        return super().output_constant(constant, prefix="Define(", assignment=",", suffix=");")
+        return super().output_constant(constant, prefix="Define('", assignment="', ", suffix=");")
 
 
 class JavaOutputer (Outputer):
+    _packageDefinition: str
+
     def __init__(self, *args, **kwargs):
-        super().__init__(comment_indentation=1, *args, **kwargs)
+        super().__init__(*args, **kwargs)
+        self._comment_indentation = 1
+        self._packageDefinition = args[0]['package']
 
     def output_header(self):
         super().output_header()
+        if self._packageDefinition:
+            self._output.write(f'package {self._packageDefinition};\n\n')
+
         class_name = self._get_class_name()
         self._output.write(textwrap.dedent(f"""\
             public final class {class_name} {{
@@ -122,25 +233,35 @@ class JavaOutputer (Outputer):
         self._output.write(f"\tpublic enum {enum.name} {{\n\t\t{separator.join([val for val in enum.values])}\n\t}}\n")
 
     def output_constant(self, constant: Constant):
-        if type(constant.value) == str:
-            self._output.write(f'\tpublic static final String {constant.name} = "{constant.value}";\n')
-        else:
-            self._output.write(
-                f'\tpublic static final {type(constant.value).__name__} {constant.name} = {constant.value};\n')
+        constantType = 'String' if constant.constantType == str else constant.constantType.__name__
+        return super().output_constant(constant, prefix=f"\tpublic static final {constantType} ", suffix=";")
 
 
 class RustOutputer (Outputer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._concat_marks = ['concatcp!(', ',', ')']
+
+    def output_header(self):
+        super().output_header()
+        if self._hasConstants:
+            self._output.write("use const_format::concatcp;\n")
+
     def output_enum(self, enum: Enum):
         separator = ', \n\t'
         self._output.write(f"pub enum {enum.name} {{\n\t{separator.join([val for val in enum.values])}\n}}\n")
 
     def output_constant(self, constant: Constant):
-        t = {int: 'i32', float: 'f32', str: '&str'}.get(type(constant.value), type(constant.value).__name__)
+        t = {int: 'i32', float: 'f32', str: '&str'}.get(constant.constantType, constant.constantType.__name__)
         quotes = '"' if t == '&str' else ''
-        self._output.write(f'pub const {constant.name}: {t} = {quotes}{constant.value}{quotes};\n')
+        return super().output_constant(constant, prefix=f"pub const ", assignment=f': {t} = ', suffix=";")
 
 
 class COutputer (Outputer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._concat_marks = ['', ' ', '']
+
     def output_header(self):
         super().output_header()
         guard_name = self._get_guard_name()
@@ -161,10 +282,7 @@ class COutputer (Outputer):
         self._output.write(f"typedef enum {{ {', '.join([val for val in enum.values])} }} {enum.name};\n")
 
     def output_constant(self, constant: Constant):
-        if type(constant.value) == str:
-            self._output.write(f'#define {name} "{constant.value}"\n')
-        else:
-            self._output.write(f'#define {name} {constant.value}\n')
+        return super().output_constant(constant, prefix=f"#define ", suffix="")
 
 
 # idea from https://stackoverflow.com/a/65734013/495995
@@ -188,16 +306,11 @@ class ROutputer (Outputer):
         super().__init__(comment_mark="#", *args, **kwargs)
 
     def output_enum(self, constant : Constant):
-        super().output_enum(constant, assignment="<-", prefix=f"{inflection.underscore(constant.name).upper()}_")
+        constant.name = ''.join(['_' + l if l.isupper() else l.upper() for l in constant.name]).strip('_')
+        super().output_enum(constant, assignment=" <- ", prefix=f"{constant.name}_")
 
-    def output_constant(self, constant: Constant, prefix="", assignment="<-", suffix=""):
-        if type(constant.value) == int:
-            value = constant.value
-        elif type(constant.value) == str:
-            value = f'"{constant.value}"'
-        else:
-            raise Exception("Internal error - illegal constant type. %s", type(constant.value))
-        self._output.write(f"{prefix}{constant.name} {assignment} {value}{suffix}\n")
+    def output_constant(self, constant: Constant, prefix="", suffix=""):
+        return super().output_constant(constant, assignment=" <- ", suffix="")
 
 
 class DartOutputer (Outputer):
@@ -211,36 +324,10 @@ class DartOutputer (Outputer):
         self._output.write("library constants;\n\n")
 
     def output_enum(self, enum: Enum):
-        self._output.write(f"enum {enum.name} {{\n")
         # Convert enum values to lowercase for more Dart-like style
-        values = ",\n  ".join([val.lower() for val in enum.values])
-        self._output.write(f"  {values}\n}}\n")
+        separator = ',\n\tcase '
+        self._output.write(f"enum {enum.name} {{\n\t{separator.join([val.lower() for val in enum.values])},\n}}\n")
 
-    def output_constant(self, constant: Constant):
-        # Convert constant names to camelCase for Dart conventions
-        # First convert to lowercase, then camelize to get proper camelCase
-        dart_name = constant.name.lower()
-        dart_name = inflection.camelize(dart_name, uppercase_first_letter=False)
-        if type(constant.value) == int:
-            self._output.write(f'const {dart_name} = {constant.value};\n')
-        elif type(constant.value) == str:
-            # Escape any special characters in strings
-            escaped_value = constant.value.replace('"', '\\"').replace('\n', '\\n')
-            self._output.write(f'const {dart_name} = "{escaped_value}";\n')
-        else:
-            raise Exception(f"Internal error - unsupported constant type: {type(constant.value)}")
-
-
-class AllOutputs (BaseModel):
-    python: Python3Outputer = None
-    python2: Python2Outputer = None
-    javascript: JavascriptOutputer = None
-    vue: VueMixinOutputer = None
-    c: COutputer = None
-    java: JavaOutputer = None
-    rust: RustOutputer = None
-    r: ROutputer = None
-    dart: DartOutputer = None
 
 class RootConfig:
     enums: List[Enum] = []
@@ -260,27 +347,34 @@ class RootConfig:
 
     def readConstants(self, constantsList: Dict):
         for constant in constantsList:
-            self.constants.append(Constant(constant['name'], constant['value']))
+            self.constants.append(Constant(constant))
 
     def readOutputers(self, outputerList: Dict):
         for key in outputerList:
             match key:
-                case 'python':
-                    self.outputs[key] = PythonOutputer(outputerList[key])
-                case 'javascript':
-                    self.outputs[key] = JavascriptOutputer(outputerList[key])
-                case 'vue':
-                    self.outputs[key] = VueMixinOutputer(outputerList[key])
-                case 'php':
-                    self.outputs[key] = PhpOutputer(outputerList[key])
                 case 'c':
                     self.outputs[key] = COutputer(outputerList[key])
+                case 'dart':
+                    self.outputs[key] = DartOutputer(outputerList[key])
                 case 'java':
                     self.outputs[key] = JavaOutputer(outputerList[key])
+                case 'javascript':
+                    self.outputs[key] = JavascriptOutputer(outputerList[key])
+                case 'php':
+                    self.outputs[key] = PhpOutputer(outputerList[key])
+                case 'python':
+                    self.outputs[key] = PythonOutputer(outputerList[key])
+                case 'r':
+                    self.outputs[key] = ROutputer(outputerList[key])
                 case 'rust':
                     self.outputs[key] = RustOutputer(outputerList[key])
+                case 'vue':
+                    self.outputs[key] = VueMixinOutputer(outputerList[key])
                 case _:
                     raise NotImplementedError(f"{key} is not a supported constant langage")
+
+            self.outputs[key].setHasEnum(len(self.enums) > 0)
+            self.outputs[key].setHasConstants(len(self.constants) > 0)
 
 
 def process_input(config: RootConfig):
