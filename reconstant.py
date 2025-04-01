@@ -1,34 +1,40 @@
+from typing import Dict, List, TextIO, Union
 import argparse
 import os
-import yaml
 import textwrap
-import inflection
-from typing import Dict, List, TextIO, Union
-from pydantic import BaseModel, PrivateAttr
+import yaml
 
 
-class Enum (BaseModel):
+class Enum:
     name: str
     values: List[str]
 
+    def __init__(self, name, values):
+        self.name = name
+        self.values = values
 
-class Constant (BaseModel):
+
+class Constant:
     name: str
     value: Union[int, str]
 
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
 
-class Outputer (BaseModel):
+
+class Outputer:
     path: str
-    _output: TextIO = PrivateAttr()
-    _comment_mark: str = PrivateAttr()
-    _comment_indentation: int = PrivateAttr() # doesn't apply to the comment in output_header()
+    _output: TextIO
+    _comment_mark: str
+    _comment_indentation: int  # doesn't apply to the comment in output_header()
 
-    def __init__(self, *args, comment_mark="#", comment_indentation=0, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, comment_mark="//", comment_indentation=0, **kwargs):
+        self.path = args[0]['path']
         self._output = open(self.path, "w")
         self._comment_mark = comment_mark
         self._comment_indentation = comment_indentation
-    
+
     def __del__(self):
         self._output.close()
 
@@ -39,7 +45,7 @@ class Outputer (BaseModel):
     def output_comment(self, comment):
         indent = '\t' * self._comment_indentation
         self._output.write(f"\n{indent}{self._comment_mark} {comment}\n")
-    
+
     def output_constant(self, constant: Constant, prefix="", assignment="=", suffix=""):
         if type(constant.value) == int:
             value = constant.value
@@ -56,30 +62,22 @@ class Outputer (BaseModel):
         pass
 
 
-class Python2Outputer (Outputer):
+class PythonOutputer (Outputer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(comment_mark="#", *args, **kwargs)
 
-    def output_enum(self, constant : Constant):
-        super().output_enum(constant, prefix=f"{inflection.underscore(constant.name).upper()}_")
-
-
-class Python3Outputer (Outputer):
-        
     def output_header(self):
         super().output_header()
         self._output.write("from enum import Enum\n")
 
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         self._output.write(f"class {enum.name}(Enum):\n")
         super().output_enum(enum, prefix=f"\t")
         self._output.write(f"\n")
 
 
 class JavascriptOutputer (Outputer):
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(comment_mark="//", *args, **kwargs)
-
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         self._output.write(f"export const {enum.name} = {{\n")
         super().output_enum(enum, prefix=f"\t", assignment=":", suffix=",")
         self._output.write(f"}}\n")
@@ -88,10 +86,22 @@ class JavascriptOutputer (Outputer):
         return super().output_constant(constant, prefix="export const ")
 
 
-class JavaOutputer (Outputer):
+class PhpOutputer (Outputer):
+    def output_header(self):
+        self._output.write("<?php\n")
+        super().output_header()
 
+    def output_enum(self, enum: Enum):
+        separator = ';\n\t'
+        self._output.write(f"Enum {enum.name} {{\n\t{separator.join([val for val in enum.values])};\n}}\n")
+
+    def output_constant(self, constant: Constant):
+        return super().output_constant(constant, prefix="Define(", assignment=",", suffix=");")
+
+
+class JavaOutputer (Outputer):
     def __init__(self, *args, **kwargs):
-        super().__init__(comment_mark="//", comment_indentation=1, *args, **kwargs)
+        super().__init__(comment_indentation=1, *args, **kwargs)
 
     def output_header(self):
         super().output_header()
@@ -107,39 +117,30 @@ class JavaOutputer (Outputer):
     def _get_class_name(self):
         return os.path.basename(self.path).replace(".java", "")
 
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         separator = ', \n\t\t'
         self._output.write(f"\tpublic enum {enum.name} {{\n\t\t{separator.join([val for val in enum.values])}\n\t}}\n")
 
     def output_constant(self, constant: Constant):
-        name = inflection.underscore(constant.name).upper()
         if type(constant.value) == str:
-            self._output.write(f'\tpublic static final String {name} = "{constant.value}";\n')
+            self._output.write(f'\tpublic static final String {constant.name} = "{constant.value}";\n')
         else:
-            self._output.write(f'\tpublic static final {type(constant.value).__name__} {name} = {constant.value};\n')
+            self._output.write(
+                f'\tpublic static final {type(constant.value).__name__} {constant.name} = {constant.value};\n')
 
 
 class RustOutputer (Outputer):
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(comment_mark="//", *args, **kwargs)
-
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         separator = ', \n\t'
         self._output.write(f"pub enum {enum.name} {{\n\t{separator.join([val for val in enum.values])}\n}}\n")
 
     def output_constant(self, constant: Constant):
-        name = inflection.underscore(constant.name).upper()
         t = {int: 'i32', float: 'f32', str: '&str'}.get(type(constant.value), type(constant.value).__name__)
         quotes = '"' if t == '&str' else ''
-        self._output.write(f'pub const {name}: {t} = {quotes}{constant.value}{quotes};\n')
+        self._output.write(f'pub const {constant.name}: {t} = {quotes}{constant.value}{quotes};\n')
 
 
 class COutputer (Outputer):
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(comment_mark="//", *args, **kwargs)
-
     def output_header(self):
         super().output_header()
         guard_name = self._get_guard_name()
@@ -156,11 +157,10 @@ class COutputer (Outputer):
     def _get_guard_name(self):
         return self.path.replace('/', '_').replace(".", "_").upper()
 
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         self._output.write(f"typedef enum {{ {', '.join([val for val in enum.values])} }} {enum.name};\n")
 
     def output_constant(self, constant: Constant):
-        name = inflection.underscore(constant.name).upper()
         if type(constant.value) == str:
             self._output.write(f'#define {name} "{constant.value}"\n')
         else:
@@ -169,8 +169,7 @@ class COutputer (Outputer):
 
 # idea from https://stackoverflow.com/a/65734013/495995
 class VueMixinOutputer (JavascriptOutputer):
-
-    def output_enum(self, enum : Enum):
+    def output_enum(self, enum: Enum):
         super().output_enum(enum)
         name = enum.name
         self._output.write(textwrap.dedent(f"""\
@@ -181,7 +180,6 @@ class VueMixinOutputer (JavascriptOutputer):
               }}
             }}
             """))
-
 
 class ROutputer (Outputer):
     """R-language Outputer"""
@@ -244,17 +242,48 @@ class AllOutputs (BaseModel):
     r: ROutputer = None
     dart: DartOutputer = None
 
+class RootConfig:
+    enums: List[Enum] = []
+    constants: List[Constant] = []
+    outputs: Dict[str, Outputer] = {}
 
-class RootConfig (BaseModel):
-    enums : List[Enum] = []
-    constants : List[Constant] = []
-    outputs: AllOutputs
+    def __init__(self, rawObject):
+        self.readEnums(rawObject['enums'])
+        self.readConstants(rawObject['constants'])
+        self.readOutputers(rawObject['outputs'])
+
+    def readEnums(self, enumList: Dict):
+        for enum in enumList:
+            self.enums.append(Enum(enum['name'], enum['values']))
+
+    def readConstants(self, constantsList: Dict):
+        for constant in constantsList:
+            self.constants.append(Constant(constant['name'], constant['value']))
+
+    def readOutputers(self, outputerList: Dict):
+        for key in outputerList:
+            match key:
+                case 'python':
+                    self.outputs[key] = PythonOutputer(outputerList[key])
+                case 'javascript':
+                    self.outputs[key] = JavascriptOutputer(outputerList[key])
+                case 'vue':
+                    self.outputs[key] = VueMixinOutputer(outputerList[key])
+                case 'php':
+                    self.outputs[key] = PhpOutputer(outputerList[key])
+                case 'c':
+                    self.outputs[key] = COutputer(outputerList[key])
+                case 'java':
+                    self.outputs[key] = JavaOutputer(outputerList[key])
+                case 'rust':
+                    self.outputs[key] = RustOutputer(outputerList[key])
+                case _:
+                    raise NotImplementedError(f"{key} is not a supported constant langage")
 
 
 def process_input(config: RootConfig):
-    outputers = [getattr(config.outputs, x) for x in config.outputs.__fields_set__]
-
-    for outputer in outputers:
+    for language in config.outputs:
+        outputer = config.outputs[language]
         outputer.output_header()
         outputer.output_comment("constants")
         for constant in config.constants:
@@ -263,17 +292,19 @@ def process_input(config: RootConfig):
         for enum in config.enums:
             outputer.output_enum(enum)
         outputer.output_footer()
-    
+
 
 def main():
-    parser = argparse.ArgumentParser(description='Reconstant - Share constant definitions between programming languages and make your constants constant again.')
+    parser = argparse.ArgumentParser(
+        description='Reconstant - Share constant definitions between programming languages and make your constants constant again.')
     parser.add_argument('input', type=str, help='input file in yaml format')
     args = parser.parse_args()
 
     with open(args.input, "r") as yaml_input:
         python_obj = yaml.safe_load(yaml_input)
-        config = RootConfig.parse_obj(python_obj)
+        config = RootConfig(python_obj)
         process_input(config)
+
 
 if __name__ == "__main__":
     main()
