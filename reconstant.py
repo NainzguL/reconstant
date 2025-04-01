@@ -248,8 +248,10 @@ class RootConfig:
     outputs: Dict[str, Outputer] = {}
 
     def __init__(self, rawObject):
-        self.readEnums(rawObject['enums'])
-        self.readConstants(rawObject['constants'])
+        if 'enums' in rawObject:
+            self.readEnums(rawObject['enums'])
+        if 'constants' in rawObject:
+            self.readConstants(rawObject['constants'])
         self.readOutputers(rawObject['outputs'])
 
     def readEnums(self, enumList: Dict):
